@@ -185,7 +185,7 @@ volatile unsigned *peri_base_virt = NULL;
 // Convert from a bus address to a physical address.
 #define BUS_TO_PHYS(x) ((x)&~0xC0000000)
 
-typedef enum {WSPR,TONE} mode_type;
+typedef enum {WSPR,TONE,QRSS} mode_type;
 
 // Structure used to control clock generator
 struct GPCTL {
@@ -795,6 +795,7 @@ void parse_commandline(
     {"terminate",        required_argument, 0, 'x'},
     {"offset",           no_argument,       0, 'o'},
     {"test-tone",        required_argument, 0, 't'},
+    {"qrss",             no_argument,       0, 'q'},
     {"no-delay",         no_argument,       0, 'n'},
     {0, 0, 0, 0}
   };
@@ -802,7 +803,7 @@ void parse_commandline(
   while (true) {
     /* getopt_long stores the option index here. */
     int option_index = 0;
-    int c = getopt_long (argc, argv, "hp:sfrx:ot:n",
+    int c = getopt_long (argc, argv, "hp:sfrx:ot:qn",
                      long_options, &option_index);
     if (c == -1)
       break;
@@ -856,6 +857,8 @@ void parse_commandline(
           std::cerr << "Error: could not parse test tone frequency" << std::endl;
           ABORT(-1);
         }
+      case 'q':
+        mode=QRSS;
         break;
       case 'n':
         no_delay=true;
@@ -878,12 +881,12 @@ void parse_commandline(
       n_free_args++;
       continue;
     }
-    if (n_free_args==1) {
+    if (mode==WSPR && n_free_args==1) {
       locator=argv[optind++];
       n_free_args++;
       continue;
     }
-    if (n_free_args==2) {
+    if (mode==WSPR && n_free_args==2) {
       tx_power=argv[optind++];
       n_free_args++;
       continue;
@@ -958,7 +961,15 @@ void parse_commandline(
       std::cerr << "Error: test tone frequency must be positive" << std::endl;
       ABORT(-1);
     }
-  } else {
+  }
+  else if (mode==QRSS) {
+    if ((callsign=="")||(center_freq_set.size()==0)) {
+      std::cerr << "Error: must specify callsign and at least one frequency for QRSS mode" << std::endl;
+      std::cerr << "Try: wspr --help" << std::endl;
+      ABORT(-1);
+    }
+  }
+  else {
     if ((callsign=="")||(locator=="")||(tx_power=="")||(center_freq_set.size()==0)) {
       std::cerr << "Error: must specify callsign, locator, dBm, and at least one frequency" << std::endl;
       std::cerr << "Try: wspr --help" << std::endl;
@@ -967,12 +978,20 @@ void parse_commandline(
   }
 
   // Print a summary of the parsed options
-  if (mode==WSPR) {
-    std::cout << "WSPR packet contents:" << std::endl;
-    std::cout << "  Callsign: " << callsign << std::endl;
-    std::cout << "  Locator:  " << locator << std::endl;
-    std::cout << "  Power:    " << tx_power << " dBm" << std::endl;
-    std::cout << "Requested TX frequencies:" << std::endl;
+  if (mode!=TONE) {
+    if (mode==WSPR) {
+      std::cout << "WSPR packet contents:" << std::endl;
+      std::cout << "  Callsign: " << callsign << std::endl;
+      std::cout << "  Locator:  " << locator << std::endl;
+      std::cout << "  Power:    " << tx_power << " dBm" << std::endl;
+      std::cout << "Requested TX frequencies:" << std::endl;
+    }
+    else {
+      std::cout << "QRSS text:" << std::endl;
+      std::cout << "  " << callsign << std::endl;
+      std::cout << "Requested TX frequency:" << std::endl;
+      test_tone = center_freq_set[0];
+    }
     std::stringstream temp;
     for (unsigned int t=0;t<center_freq_set.size();t++) {
       temp << std::setprecision(6) << std::fixed;
@@ -1229,6 +1248,71 @@ int main(const int argc, char * const argv[]) {
 
     // Should never get here...
 
+  } else if (mode==QRSS) {
+    double wspr_symtime = WSPR_SYMTIME;
+    double tone_spacing=1.0/wspr_symtime;
+
+    std::stringstream temp;
+    temp << std::setprecision(6) << std::fixed << "Transmitting QRSS " << callsign << " on frequency " << test_tone/1.0e6 << " MHz" << std::endl;
+    std::cout << temp.str();
+    std::cout << "Press CTRL-C to exit!" << std::endl;
+
+    txon();
+    std::vector <double> dma_table_freq;
+    // Set to non-zero value to ensure setupDMATab is called at least once.
+    double ppm_prev=123456;
+    double center_freq_actual;
+
+    if (self_cal) {
+      update_ppm(ppm);
+    }
+    if (ppm!=ppm_prev) {
+      setupDMATab(test_tone+1.5*tone_spacing,tone_spacing,F_PLLD_CLK*(1-ppm/1e6),dma_table_freq,center_freq_actual,constPage);
+      //cout << std::setprecision(30) << dma_table_freq[0] << std::endl;
+      //cout << std::setprecision(30) << dma_table_freq[1] << std::endl;
+      //cout << std::setprecision(30) << dma_table_freq[2] << std::endl;
+      //cout << std::setprecision(30) << dma_table_freq[3] << std::endl;
+      if (center_freq_actual!=test_tone+1.5*tone_spacing) {
+        std::cout << "  Warning: because of hardware limitations, test tone will be transmitted on" << std::endl;
+        std::stringstream temp;
+        temp << std::setprecision(6) << std::fixed << "  frequency: " << (center_freq_actual-1.5*tone_spacing)/1e6 << " MHz" << std::endl;
+        std::cout << temp.str();
+      }
+      ppm_prev=ppm;
+    }
+   
+    const char *code;
+    const static char *codetable[] = { ".-", "-...", "-.-.", "-..", ".", "..-.", "--.", "....", "..",".---", "-.-",".-..","--","-.","---",".--.","--.-",".-.","...","-","..-","...-", ".--","-..-","-.--","--..","-----",".----","..---","...--","....-",".....", "-....", "--...","---..","----."};
+
+    int bufPtr=0;
+    for (size_t i = 0; i < strlen(callsign.c_str()); i++) {
+      char c = callsign.c_str()[i];
+      std::cout << "QRSS transmit " << c << std::endl;
+      if (isalpha(c)) {
+        code = codetable[c-65]; }
+      else if (isdigit(c)) {
+        code = codetable[c-22];
+      }
+
+      int dotlen = 3;
+      float len = 0;
+      for (size_t j = 0; j < strlen(code) ; j++) {
+	c = code[j];
+        std::cout << c << std::flush;
+	if (c == '.') {
+          len = dotlen;
+        } else {
+          len = 3*dotlen;
+        }
+    	txon();
+        txSym(0, center_freq_actual, tone_spacing, len, dma_table_freq, F_PWM_CLK_INIT, instrs, constPage, bufPtr);
+        txoff();
+	usleep(dotlen * 1e6);
+      }
+      std::cout << " " << std::flush;
+      usleep(2*dotlen * 1e6);
+    }
+    // Should never get here...
   } else {
     // WSPR mode
 
