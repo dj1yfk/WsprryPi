@@ -2,9 +2,9 @@
 
 Added functionality:
 
-usage:  wspr -q callsign frequency
+usage:  wspr -q sec callsign frequency
 
-Transmits "callsign" on "frequency" in QRSS3.
+Transmits "callsign" on "frequency" in QRSS with a dot length of "sec".
 
 Original README from https://github.com/threeme3/WsprryPi below:
 ----------------------------------------------------------------

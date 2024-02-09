@@ -723,6 +723,8 @@ void print_usage() {
   std::cout << "  wspr [options] callsign locator tx_pwr_dBm f1 <f2> <f3> ..." << std::endl;
   std::cout << "    OR" << std::endl;
   std::cout << "  wspr [options] --test-tone f" << std::endl;
+  std::cout << "    OR" << std::endl;
+  std::cout << "  wspr [options] -q 3 callsign f   # QRSS3 transmission" << std::endl;
   std::cout << std::endl;
   std::cout << "Options:" << std::endl;
   std::cout << "  -h --help" << std::endl;
@@ -774,7 +776,8 @@ void parse_commandline(
   double & test_tone,
   bool & no_delay,
   mode_type & mode,
-  int & terminate
+  int & terminate,
+  int & dotlength
 ) {
   // Default values
   ppm=0;
@@ -795,7 +798,7 @@ void parse_commandline(
     {"terminate",        required_argument, 0, 'x'},
     {"offset",           no_argument,       0, 'o'},
     {"test-tone",        required_argument, 0, 't'},
-    {"qrss",             no_argument,       0, 'q'},
+    {"qrss",             required_argument, 0, 'q'},
     {"no-delay",         no_argument,       0, 'n'},
     {0, 0, 0, 0}
   };
@@ -803,7 +806,7 @@ void parse_commandline(
   while (true) {
     /* getopt_long stores the option index here. */
     int option_index = 0;
-    int c = getopt_long (argc, argv, "hp:sfrx:ot:qn",
+    int c = getopt_long (argc, argv, "hp:sfrx:ot:q:n",
                      long_options, &option_index);
     if (c == -1)
       break;
@@ -859,6 +862,11 @@ void parse_commandline(
         }
       case 'q':
         mode=QRSS;
+        dotlength=strtod(optarg,&endp);
+        if ((optarg==endp)||(*endp!='\0')) {
+          std::cerr << "Error: could not parse QRSS dotlength" << std::endl;
+          ABORT(-1);
+        }
         break;
       case 'n':
         no_delay=true;
@@ -963,8 +971,8 @@ void parse_commandline(
     }
   }
   else if (mode==QRSS) {
-    if ((callsign=="")||(center_freq_set.size()==0)) {
-      std::cerr << "Error: must specify callsign and at least one frequency for QRSS mode" << std::endl;
+    if ((dotlength==0)||(callsign=="")||(center_freq_set.size()==0)) {
+      std::cerr << "Error: must specify dotlength, callsign and at least one frequency for QRSS mode" << std::endl;
       std::cerr << "Try: wspr --help" << std::endl;
       ABORT(-1);
     }
@@ -987,7 +995,7 @@ void parse_commandline(
       std::cout << "Requested TX frequencies:" << std::endl;
     }
     else {
-      std::cout << "QRSS text:" << std::endl;
+      std::cout << "QRSS (" << dotlength << "s dotlength):" << std::endl;
       std::cout << "  " << callsign << std::endl;
       std::cout << "Requested TX frequency:" << std::endl;
       test_tone = center_freq_set[0];
@@ -1172,6 +1180,7 @@ int main(const int argc, char * const argv[]) {
   std::string locator;
   std::string tx_power;
   std::vector <double> center_freq_set;
+  int dotlength;
   double ppm;
   bool self_cal;
   bool repeat;
@@ -1194,7 +1203,8 @@ int main(const int argc, char * const argv[]) {
     test_tone,
     no_delay,
     mode,
-    terminate
+    terminate,
+    dotlength
   );
   int nbands=center_freq_set.size();
 
@@ -1294,23 +1304,22 @@ int main(const int argc, char * const argv[]) {
         code = codetable[c-22];
       }
 
-      int dotlen = 3;
       float len = 0;
       for (size_t j = 0; j < strlen(code) ; j++) {
 	c = code[j];
         std::cout << c << std::flush;
 	if (c == '.') {
-          len = dotlen;
+          len = dotlength;
         } else {
-          len = 3*dotlen;
+          len = 3*dotlength;
         }
     	txon();
         txSym(0, center_freq_actual, tone_spacing, len, dma_table_freq, F_PWM_CLK_INIT, instrs, constPage, bufPtr);
         txoff();
-	usleep(dotlen * 1e6);
+	usleep(dotlength * 1e6);
       }
       std::cout << " " << std::flush;
-      usleep(2*dotlen * 1e6);
+      usleep(2*dotlength * 1e6);
     }
     // Should never get here...
   } else {
