@@ -724,7 +724,8 @@ void print_usage() {
   std::cout << "    OR" << std::endl;
   std::cout << "  wspr [options] --test-tone f" << std::endl;
   std::cout << "    OR" << std::endl;
-  std::cout << "  wspr [options] -q 3 callsign f   # QRSS3 transmission" << std::endl;
+  std::cout << "  wspr [options] -q n callsign f   # QRSSn transmission" << std::endl;
+  std::cout << "  wspr [options] -q n callsign f o # DFCWn transmission with o Hz offset" << std::endl;
   std::cout << std::endl;
   std::cout << "Options:" << std::endl;
   std::cout << "  -h --help" << std::endl;
@@ -986,6 +987,7 @@ void parse_commandline(
   }
 
   // Print a summary of the parsed options
+  std::stringstream temp;
   if (mode!=TONE) {
     if (mode==WSPR) {
       std::cout << "WSPR packet contents:" << std::endl;
@@ -993,19 +995,21 @@ void parse_commandline(
       std::cout << "  Locator:  " << locator << std::endl;
       std::cout << "  Power:    " << tx_power << " dBm" << std::endl;
       std::cout << "Requested TX frequencies:" << std::endl;
+      for (unsigned int t=0;t<center_freq_set.size();t++) {
+        temp << std::setprecision(6) << std::fixed;
+        temp << "  " << center_freq_set[t]/1e6 << " MHz" << std::endl;
+      }
+      std::cout << temp.str();
     }
     else {
       std::cout << "QRSS (" << dotlength << "s dotlength):" << std::endl;
       std::cout << "  " << callsign << std::endl;
       std::cout << "Requested TX frequency:" << std::endl;
-      test_tone = center_freq_set[0];
+      std::cout << "  " << center_freq_set[0]/1e6 << " MHz" << std::endl;
+      if (center_freq_set.size() > 1) {
+        std::cout << "  DFCW shift: " << center_freq_set[1] << " Hz" << std::endl;
+      }
     }
-    std::stringstream temp;
-    for (unsigned int t=0;t<center_freq_set.size();t++) {
-      temp << std::setprecision(6) << std::fixed;
-      temp << "  " << center_freq_set[t]/1e6 << " MHz" << std::endl;
-    }
-    std::cout << temp.str();
     temp.str("");
     if (self_cal) {
       temp << "  NTP will be used to periodically calibrate the transmission frequency" << std::endl;
@@ -1261,9 +1265,16 @@ int main(const int argc, char * const argv[]) {
   } else if (mode==QRSS) {
     double wspr_symtime = WSPR_SYMTIME;
     double tone_spacing=1.0/wspr_symtime;
+    bool dfcw = (center_freq_set.size() == 2) ? true : false;
 
     std::stringstream temp;
-    temp << std::setprecision(6) << std::fixed << "Transmitting QRSS " << callsign << " on frequency " << test_tone/1.0e6 << " MHz" << std::endl;
+    if (!dfcw) {
+      temp << std::setprecision(6) << std::fixed << "Transmitting QRSS " << callsign << " on frequency " << center_freq_set[0]/1.0e6 << " MHz" << std::endl;
+    }
+    else {
+    std::cout << "dddd" << std::endl;
+      temp << std::setprecision(6) << std::fixed << "Transmitting DFCW " << callsign << " on frequency " << center_freq_set[0]/1.0e6 << " MHz with DFCW offset " << center_freq_set[1] << " Hz" << std::endl;
+    }
     std::cout << temp.str();
     std::cout << "Press CTRL-C to exit!" << std::endl;
 
@@ -1277,12 +1288,8 @@ int main(const int argc, char * const argv[]) {
       update_ppm(ppm);
     }
     if (ppm!=ppm_prev) {
-      setupDMATab(test_tone+1.5*tone_spacing,tone_spacing,F_PLLD_CLK*(1-ppm/1e6),dma_table_freq,center_freq_actual,constPage);
-      //cout << std::setprecision(30) << dma_table_freq[0] << std::endl;
-      //cout << std::setprecision(30) << dma_table_freq[1] << std::endl;
-      //cout << std::setprecision(30) << dma_table_freq[2] << std::endl;
-      //cout << std::setprecision(30) << dma_table_freq[3] << std::endl;
-      if (center_freq_actual!=test_tone+1.5*tone_spacing) {
+      setupDMATab(center_freq_set[0]+1.5*tone_spacing,tone_spacing,F_PLLD_CLK*(1-ppm/1e6),dma_table_freq,center_freq_actual,constPage);
+      if (center_freq_actual!=center_freq_set[0]+1.5*tone_spacing) {
         std::cout << "  Warning: because of hardware limitations, test tone will be transmitted on" << std::endl;
         std::stringstream temp;
         temp << std::setprecision(6) << std::fixed << "  frequency: " << (center_freq_actual-1.5*tone_spacing)/1e6 << " MHz" << std::endl;
@@ -1304,23 +1311,41 @@ int main(const int argc, char * const argv[]) {
         code = codetable[c-22];
       }
 
+      // prepend space (low) before transmission in DFCW mode
+      if (dfcw && i == 0) {
+          txon();
+          txSym(0, center_freq_actual - center_freq_set[1], tone_spacing, 3*dotlength, dma_table_freq, F_PWM_CLK_INIT, instrs, constPage, bufPtr);
+      }
+
       float len = 0;
       for (size_t j = 0; j < strlen(code) ; j++) {
-	c = code[j];
+        c = code[j];
         std::cout << c << std::flush;
-	if (c == '.') {
+        if (c == '.') {
           len = dotlength;
         } else {
           len = 3*dotlength;
         }
     	txon();
         txSym(0, center_freq_actual, tone_spacing, len, dma_table_freq, F_PWM_CLK_INIT, instrs, constPage, bufPtr);
-        txoff();
-	usleep(dotlength * 1e6);
+        if (dfcw) {
+            txSym(0, center_freq_actual - center_freq_set[1], tone_spacing, dotlength, dma_table_freq, F_PWM_CLK_INIT, instrs, constPage, bufPtr);
+        }
+        else {
+            txoff();
+            usleep(dotlength * 1e6);
+        }
       }
       std::cout << " " << std::flush;
-      usleep(2*dotlength * 1e6);
+      // letter space
+      if (dfcw) {
+            txSym(0, center_freq_actual - center_freq_set[1], tone_spacing, 2*dotlength, dma_table_freq, F_PWM_CLK_INIT, instrs, constPage, bufPtr);
+      }
+      else {
+          usleep(2*dotlength * 1e6);
+      }
     }
+    txoff();
     // Should never get here...
   } else {
     // WSPR mode

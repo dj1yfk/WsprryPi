@@ -1,10 +1,12 @@
-# WsprryPi fork by DJ5CW adding QRSS transmitting capability
+# WsprryPi fork by DJ5CW adding QRSS / DFCW transmitting capability
 
 Added functionality:
 
-usage:  wspr -q sec callsign frequency
+usage:  wspr -q sec callsign frequency [offset]
 
 Transmits "callsign" on "frequency" in QRSS with a dot length of "sec".
+If the offset parameter (in Hz) is specified, the transmission will be in DFCW
+(FSK-CW).
 
 Original README from https://github.com/threeme3/WsprryPi below:
 ----------------------------------------------------------------
