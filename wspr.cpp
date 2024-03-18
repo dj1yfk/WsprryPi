@@ -373,6 +373,7 @@ void txSym(
   const double f1_freq=dma_table_freq[f1_idx];
   const double tone_freq=center_freq-1.5*tone_spacing+sym_num*tone_spacing;
   // Double check...
+  // printf("tone_freq = %f, f0_freq = %f, f1_freq = %f\n", tone_freq, f0_freq, f1_freq);
   assert((tone_freq>=f0_freq)&&(tone_freq<=f1_freq));
   const double f0_ratio=1.0-(tone_freq-f0_freq)/(f1_freq-f0_freq);
   //cout << "f0_ratio = " << f0_ratio << std::endl;
@@ -1290,14 +1291,24 @@ int main(const int argc, char * const argv[]) {
     if (ppm!=ppm_prev) {
       setupDMATab(center_freq_set[0]+1.5*tone_spacing,tone_spacing,F_PLLD_CLK*(1-ppm/1e6),dma_table_freq,center_freq_actual,constPage);
       if (center_freq_actual!=center_freq_set[0]+1.5*tone_spacing) {
-        std::cout << "  Warning: because of hardware limitations, test tone will be transmitted on" << std::endl;
+        std::cout << "  Warning: because of hardware limitations, QRSS tone will be transmitted on" << std::endl;
         std::stringstream temp;
         temp << std::setprecision(6) << std::fixed << "  frequency: " << (center_freq_actual-1.5*tone_spacing)/1e6 << " MHz" << std::endl;
         std::cout << temp.str();
       }
       ppm_prev=ppm;
     }
-   
+ 
+    // sometimes (depending on ppm value), the lower DFCW frequency is
+    // below the limit of the DMA range. In this case, set the lower
+    // DFCW frequency to the lowest possible. Do not correct main freq. 
+    if (dfcw && center_freq_actual - center_freq_set[1] < dma_table_freq[0]) {
+        printf("Warning: DFCW shift frequency corrected from %f to ", center_freq_set[1]);
+        center_freq_set[1] = center_freq_actual - dma_table_freq[0] - 1.5*tone_spacing;
+        printf("%f.\n", center_freq_set[1]);
+    }
+
+
     const char *code;
     const static char *codetable[] = { ".-", "-...", "-.-.", "-..", ".", "..-.", "--.", "....", "..",".---", "-.-",".-..","--","-.","---",".--.","--.-",".-.","...","-","..-","...-", ".--","-..-","-.--","--..","-----",".----","..---","...--","....-",".....", "-....", "--...","---..","----."};
 
